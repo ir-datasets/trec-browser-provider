@@ -24,7 +24,15 @@ RUN pip install --no-cache-dir --no-deps --force-reinstall .
 WORKDIR /workspaces/ir-datasets.com
 RUN ir-datasets-site build-graph-db --providers trec-browser
 
-# 0.0.0.0, not the `serve` subcommand's own 127.0.0.1 default, so the Flask
-# dev server inside the container is reachable from outside it.
+# `ir-datasets-site serve` (Flask's own dev server) is for local development
+# only -- it warns, and isn't meant to carry real traffic. gunicorn runs the
+# same module-level `app` object (see cli.py's own `from .app import app`)
+# as a production WSGI server instead; `IR_DATASETS_SITE_STORE` is the env
+# var app.py reads at import time to find graph.db (same one `serve --store`
+# sets -- defaults to ./graph.db, which is this WORKDIR, where build-graph-db
+# just wrote it).
+RUN pip install --no-cache-dir gunicorn
+ENV IR_DATASETS_SITE_STORE=/workspaces/ir-datasets.com/graph.db
+
 EXPOSE 5000
-ENTRYPOINT ["ir-datasets-site", "serve", "--host", "0.0.0.0", "--port", "5000"]
+ENTRYPOINT ["gunicorn", "--bind", "0.0.0.0:5000", "ir_datasets_site.app:app"]
