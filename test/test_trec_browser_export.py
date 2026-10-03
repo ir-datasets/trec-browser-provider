@@ -7,6 +7,7 @@ docstring) rather than hitting pages.nist.gov.
 """
 import re
 import unittest
+import warnings
 
 from trec_browser_provider import export as tbe
 
@@ -277,6 +278,114 @@ class TestResultsTrackSubtrackNeverContainWhitespace(unittest.TestCase):
         offenders = [key for key in index
                     if (key[0] and re.search(r'\s', key[0]))
                     or (key[1] and re.search(r'\s', key[1]))]
+        self.assertEqual([], offenders)
+
+
+#: Reproduces -- not just simulates -- the real, confirmed-live cause of a
+#: genuinely corrupted shipped record (``trec19/entity/ICTNETRun1``, see
+#: ``export.py``'s own ``_text``/``_ul_belongs_to_a_single_run`` docstrings):
+#: ``ICTNETRun1``'s own ``<ul>`` is left unclosed in the source HTML (no
+#: ``</ul>`` before ``ilpsA500``'s ``<h4>``). Feeding this through lxml's
+#: own HTML parser (not a hand-rolled approximation -- see
+#: ``test_lxml_really_merges_an_unclosed_ul_into_one`` below) reproduces
+#: NIST's actual failure mode: ``ilpsA500``'s ``<h4>``/``<p>``/``<li>``s all
+#: end up *inside* ``ICTNETRun1``'s one physical ``<ul>`` element, so
+#: ``following-sibling::ul[1]`` from ``ICTNETRun1``'s own ``<h4>`` resolves
+#: to a single ``<ul>`` holding *both* runs' bullets -- two ``<li>``s per
+#: label instead of one.
+_MERGED_UL_PAGE_URL = 'https://pages.nist.gov/trec-browser/trec19/entity/runs/'
+_MERGED_UL_FIXTURE = '''
+<html><body>
+<h1 id="runs-entity-2010">Runs - Entity 2010</h1>
+<h4 id="ictnetrun1">ICTNETRun1</h4>
+<p><a href="https://trec.nist.gov/results/trec19/entity/input.ICTNETRun1.gz"><code>Input</code></a></p>
+<ul>
+<li><strong>Run ID:</strong> ICTNETRun1</li>
+<li><strong>Participant:</strong> ICTNET</li>
+<li><strong>Track:</strong> Entity</li>
+<li><strong>Year:</strong> 2010</li>
+<li><strong>Submission:</strong> 10/1/2010</li>
+<li><strong>Type:</strong> automatic</li>
+<li><strong>MD5:</strong> <code>0d94b2bd88e28144ff9e4ada4372f2ea</code></li>
+<h4 id="ilpsa500">ilpsA500</h4>
+<p><a href="https://trec.nist.gov/results/trec19/entity/input.ilpsA500.gz"><code>Input</code></a></p>
+<li><strong>Run ID:</strong> ilpsA500</li>
+<li><strong>Participant:</strong> UAms</li>
+<li><strong>Track:</strong> Entity</li>
+<li><strong>Year:</strong> 2010</li>
+<li><strong>Submission:</strong> 9/30/2010</li>
+<li><strong>Type:</strong> automatic</li>
+<li><strong>MD5:</strong> <code>e0ade9666cf43cf895a5281ae60e4da7</code></li>
+</ul>
+</body></html>
+'''
+
+
+class TestAMisScopedUlNeverProducesAConcatenatedValue(unittest.TestCase):
+    """Regression tests for the real bug behind
+    ``ValueError: Failed to convert triple #34781 to a quad`` (reported
+    against ``trec-browser:trec19/entity/input.ICTNETRun1.gz``): NIST's own
+    HTML sometimes leaves a run's ``<ul>`` unclosed, so lxml's HTML-recovery
+    parser folds the *next* run's ``<h4>``/``<p>``/``<li>``s into that same,
+    one physical ``<ul>`` -- two ``<li>``s per label where exactly one was
+    expected. The old ``_text`` joined *every* matching ``<li>``'s value
+    with ``''.join(...)``, so a ``<ul>`` merged across N runs produced one
+    N-values-concatenated blob per field (confirmed live: this shipped
+    static index row has exactly that shape, 35 values deep -- see
+    ``trec_browser_provider/etc/trec_browser_runs.json.gz``). The fix:
+    ``_text`` now takes only the first (nearest, correctly-scoped) matching
+    ``<li>``'s value."""
+
+    def test_lxml_really_merges_an_unclosed_ul_into_one(self):
+        """Not this module's own behaviour -- a sanity check that the
+        fixture actually reproduces NIST's HTML shape as lxml parses it,
+        so the rest of this test class is exercising a real failure mode,
+        not a contrived one."""
+        html = tbe._lxml_html()
+        tree = html.fromstring(_MERGED_UL_FIXTURE.encode('utf-8'))
+        [header] = tree.xpath('//h4[@id="ictnetrun1"]')
+        [ul] = header.xpath('following-sibling::ul[1]')
+        self.assertEqual(
+            2, len(ul.xpath('.//strong[starts-with(text(), "Type")]')),
+            msg="the fixture's ilpsA500 <h4>/<li>s must land inside "
+                "ICTNETRun1's <ul> for this test class to mean anything")
+
+    def setUp(self):
+        self.records = list(tbe.parse_run_listing(
+            _MERGED_UL_FIXTURE.encode('utf-8'), _MERGED_UL_PAGE_URL))
+
+    def test_the_merged_run_gets_its_own_single_value_per_field_not_a_blob(self):
+        run = self.records[0]
+        self.assertEqual('ICTNETRun1', run['run_id'])
+        self.assertEqual('ICTNET', run['participant'])
+        self.assertEqual('Entity', run['track'])
+        self.assertEqual('2010', run['year'])
+        self.assertEqual('10/1/2010', run['submission'])
+        self.assertEqual('automatic', run['type'])
+        self.assertEqual('0d94b2bd88e28144ff9e4ada4372f2ea', run['md5'])
+
+    def test_a_mis_scoped_ul_is_warned_about(self):
+        with self.assertWarnsRegex(UserWarning, 'more than one'):
+            list(tbe.parse_run_listing(
+                _MERGED_UL_FIXTURE.encode('utf-8'), _MERGED_UL_PAGE_URL))
+
+    def test_a_well_formed_ul_is_never_warned_about(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            list(tbe.parse_run_listing(_FIXTURE.encode('utf-8'), _PAGE_URL))
+
+    def test_no_shipped_record_in_the_static_index_has_a_multi_value_field(self):
+        """The regenerated static index itself must have no surviving
+        multi-value blob from before this fix (this is the actual,
+        confirmed-corrupted shipped row the bug report was about)."""
+        from trec_browser_provider import dataset as tbm
+        offenders = []
+        for key, record in tbm._STATIC_INDEX.items():
+            for field in ('participant', 'track', 'year', 'submission',
+                         'type', 'md5'):
+                value = record.get(field)
+                if value and len(value.split()) > 1 and '   ' in value:
+                    offenders.append((key, field))
         self.assertEqual([], offenders)
 
 

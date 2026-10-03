@@ -42,6 +42,7 @@ import re
 import sys
 import time
 import urllib.parse
+import warnings
 
 import ir_datasets
 
@@ -152,11 +153,44 @@ def run_listing_pages(session):
 def _text(li, label):
     # Each <li> is `<span icon/> <strong>Label:</strong> value`; strip the
     # icon/label, keep whatever text (or a nested <code>, for MD5) follows.
-    value = ''.join(li.xpath(f'.//strong[starts-with(text(), "{label}")]'
-                              '/following-sibling::text() | '
-                              f'.//strong[starts-with(text(), "{label}")]'
-                              '/following-sibling::code/text()'))
+    #
+    # Only the *first* matching <strong> is used (`[1]`, not every match):
+    # `following-sibling::text()` is evaluated per matched node and the
+    # results concatenated, so if this <ul> is confirmed to carry more than
+    # one run's bullets (see its own docstring and
+    # `_ul_belongs_to_a_single_run` below -- this is a defensive fallback,
+    # not the primary guard), blindly joining every match would silently
+    # concatenate every run's value for this label into one unreadable blob
+    # instead of this run's own single value -- exactly the shape of a
+    # since-confirmed, real corrupted record (trec19/entity/ICTNETRun1,
+    # `   `-joined ~35 values deep for participant/track/year/submission/
+    # type/md5 alike). Taking only the first match keeps this run's own
+    # bullet (document order; this <ul> is anchored right after this run's
+    # own <h4>/<p>) even if the <ul> itself was mis-scoped.
+    strongs = li.xpath(f'.//strong[starts-with(text(), "{label}")]')
+    if not strongs:
+        return ''
+    value = ''.join(strongs[0].xpath('following-sibling::text() | '
+                                      'following-sibling::code/text()'))
     return value.strip()
+
+
+def _ul_belongs_to_a_single_run(ul):
+    """Whether ``ul`` (a candidate ``following-sibling::ul[1]`` match for one
+    run's ``<h4>``) looks like it holds exactly one run's own bullets, not
+    several runs' merged together. A well-formed run <ul> has at most one
+    ``<li>`` per ``_FIELD_LABELS`` entry; more than one ``<li>`` for the same
+    label (confirmed live to happen -- see ``_text``'s own docstring) means
+    this <ul> was mis-scoped by `following-sibling::ul[1]` (most likely:
+    NIST's own HTML left an earlier run's list unclosed, so libxml2's HTML
+    recovery merged several runs' <li> bullets into one <ul>). Used by
+    ``parse_run_listing`` only to decide whether to warn -- ``_text`` above
+    still recovers a correct, single value either way by taking the first
+    match."""
+    for label in _FIELD_LABELS:
+        if len(ul.xpath(f'.//strong[starts-with(text(), "{label}")]')) > 1:
+            return False
+    return True
 
 
 def parse_run_listing(content, page_url):
@@ -182,6 +216,13 @@ def parse_run_listing(content, page_url):
                     links[key] = a.get('href')
         record = {'links': links}
         if ul:
+            if not _ul_belongs_to_a_single_run(ul[0]):
+                warnings.warn(
+                    f'{page_url}#{anchor}: following-sibling::ul[1] holds '
+                    "more than one run's bullets for some field (likely an "
+                    "unclosed <ul> upstream merging runs together); using "
+                    "only the first, nearest match per field.",
+                    stacklevel=2)
             for label, field in _FIELD_LABELS.items():
                 record[field] = _text(ul[0], label)
         # Overrides the free-text "Run ID:" bullet (just parsed into

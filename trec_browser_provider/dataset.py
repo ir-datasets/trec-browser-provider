@@ -279,6 +279,30 @@ def _gated_resource(name, url_path=None, **meta):
                               citation=CITATION, **meta)
 
 
+#: Scraped record keys copied onto a run/summary node's own ``metadata``,
+#: mapped to the metadata key they're stored under. ``type`` (the scraped
+#: submission type, e.g. "automatic"/"manual") is deliberately renamed to
+#: ``submission_type``: ``Node.metadata``'s ``type`` key is reserved by
+#: ``ir_datasets.v2`` itself for the node's own graph type (see
+#: ``freeze.row_for``/``Generator.enumerate_rows``, both of which build a row
+#: as ``{'type': node.type, **node.metadata}`` / ``{'type': ..., **row_metadata(...)}``);
+#: keeping the scraped field under the same ``type`` key would silently
+#: overwrite the node's real graph type with the scraped value whenever a
+#: record has one.
+_SCRAPED_METADATA_KEYS = {
+    'participant': 'participant', 'track': 'track', 'year': 'year',
+    'submission': 'submission', 'type': 'submission_type',
+    'deep_link': 'deep_link', 'ir_datasets_ids': 'ir_datasets_ids'}
+
+
+def _scraped_metadata(record):
+    """``record``'s scraped fields, keyed for ``Node.metadata`` (see
+    ``_SCRAPED_METADATA_KEYS``'s docstring for why ``type`` is renamed)."""
+    return {meta_key: record[key]
+            for key, meta_key in _SCRAPED_METADATA_KEYS.items()
+            if record.get(key)}
+
+
 def _run(track, subtrack, run_id, record=None):
     name = _path(track, subtrack, f'input.{run_id}.gz')
     # The backing raw Resource gets its own, distinct *name* (`.raw` suffix)
@@ -294,10 +318,7 @@ def _run(track, subtrack, run_id, record=None):
     if record:
         if record.get('md5'):
             resource_kwargs['hash'] = f"md5:{record['md5']}"
-        for key in ('participant', 'track', 'year', 'submission', 'type',
-                    'deep_link', 'ir_datasets_ids'):
-            if record.get(key):
-                extra_meta[key] = record[key]
+        extra_meta.update(_scraped_metadata(record))
     resource = _gated_resource(f'{name}.raw', url_path=name, **resource_kwargs)
     desc = (f'Run {run_id!r}, submitted to {track}/{subtrack} -- '
             'downloaded and parsed from the TREC Browser-linked run file at '
@@ -326,10 +347,7 @@ def _summary(track, subtrack, kind, run_id, record=None):
     if record:
         if record.get('md5'):
             resource_kwargs['hash'] = f"md5:{record['md5']}"
-        for key in ('participant', 'track', 'year', 'submission', 'type',
-                    'deep_link', 'ir_datasets_ids'):
-            if record.get(key):
-                extra_meta[key] = record[key]
+        extra_meta.update(_scraped_metadata(record))
         if record.get('description'):
             desc += f" {record['description']}"
     resource = _gated_resource(f'{name}.raw', url_path=name, **resource_kwargs)
@@ -412,10 +430,7 @@ def _known_run_row(run_path):
     row = {}
     if record.get('md5'):
         row['validation'] = {'type': 'file_hash', 'hashes': [f"md5:{record['md5']}"]}
-    for key in ('participant', 'track', 'year', 'submission', 'type',
-                'deep_link', 'ir_datasets_ids'):
-        if record.get(key):
-            row[key] = record[key]
+    row.update(_scraped_metadata(record))
     return row
 
 
