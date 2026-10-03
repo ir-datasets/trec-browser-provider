@@ -1,4 +1,4 @@
-# docker build -f docker/graph-db.Dockerfile -t ghcr.io/ir-datasets/ir-datasets.com:0.0.1-trec-browser .
+# docker build -f docker/graph-db.Dockerfile -t ghcr.io/ir-datasets/trec-browser-provider:0.0.1-trec-browser .
 #
 # Rebuilds ir-datasets.com's own dev image (see
 # ../../ir-datasets.com/.devcontainer/Dockerfile, which installs this
@@ -8,6 +8,7 @@
 # provider into the image, and serves it by default -- so the image is
 # directly runnable, with no separate build step at deploy time.
 FROM ghcr.io/ir-datasets/ir-datasets.com:0.0.1-dev
+LABEL org.opencontainers.image.source="https://github.com/ir-datasets/trec-browser-provider"
 
 # Overwrite whatever commit of this package the base image shipped with.
 # --no-deps: this package declares no dependencies of its own (ir_datasets.v2

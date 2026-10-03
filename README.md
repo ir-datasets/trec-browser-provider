@@ -48,6 +48,21 @@ pip install -e .
 pytest
 ```
 
+## Graph database image
+
+Run the **build trec-browser graph-db image** workflow manually in GitHub Actions
+to build and publish `ghcr.io/ir-datasets/trec-browser-provider:0.0.1-trec-browser`.
+It uses the `ir-datasets.com:0.0.1-dev` base image, but publishes to this
+repository's package so its `GITHUB_TOKEN` can write it without cross-repository
+package access.
+
+To build and run it locally:
+
+```bash
+docker build -f docker/graph-db.Dockerfile -t ghcr.io/ir-datasets/trec-browser-provider:0.0.1-trec-browser .
+docker run --rm -p 5000:5000 ghcr.io/ir-datasets/trec-browser-provider:0.0.1-trec-browser
+```
+
 If you use run files, or data, please ensure to cite the corresponding paper of the run file and please also cite the TREC Browser.
 
 ```
