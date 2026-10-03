@@ -10,8 +10,14 @@ entry-point mechanism (see `ir_datasets`'s own `AGENTS.md`/`v2/README.md`).
 install it from git first, then install this package:
 
 ```bash
-pip install 'ir_datasets @ git+https://github.com/ir-datasets/ir-datasets.git'
+pip install 'git+https://github.com/ir-datasets/ir-datasets.git@v2'
 pip install trec-browser-provider
+```
+
+This package is not yet published on PyPI either, so for now install it directly from git:
+
+```bash
+pip install git+https://github.com/ir-datasets/trec-browser-provider.git
 ```
 
 You need a user name and a password to access those files (please ask people from the TREC community or in the SIGIR slack if you need credentials).
@@ -31,6 +37,16 @@ ir_datasets export 'trec-browser:trec28/decision/input.ICTNETv1BM25.gz' scoreddo
 See [`trec_browser_provider/docs/trec-browser.md`](trec_browser_provider/docs/trec-browser.md)
 for the full documentation (name shapes, the static metadata index, exporting
 globs/`--raw`, and how to obtain credentials).
+
+## Run tests locally
+
+Install the test dependencies and this package (editable), then run `pytest`:
+
+```bash
+pip install -r requirements-test.txt
+pip install -e .
+pytest
+```
 
 If you use run files, or data, please ensure to cite the corresponding paper of the run file and please also cite the TREC Browser.
 

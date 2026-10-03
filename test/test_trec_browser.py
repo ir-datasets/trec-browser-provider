@@ -46,12 +46,12 @@ class TestV2TrecBrowser(unittest.TestCase):
 
     def test_trec_eval_summary_resolves_to_an_evaluation_table(self):
         node = v2.graph['trec-browser:trec28/decision/summary.trec_eval.ICTNETv1BM25']
-        self.assertIsInstance(node, v2.TrecEval)
-        self.assertEqual(v2.EvaluationTable.type, node.type)
+        self.assertIsInstance(node, tbm.TrecEval)
+        self.assertEqual(tbm.EVALUATION_TABLE, node.type)
 
     def test_extended_summary_resolves_to_an_evaluation_table(self):
         node = v2.graph['trec-browser:trec28/decision/summary.extended.ICTNETv1BM25']
-        self.assertIsInstance(node, v2.TrecEval)
+        self.assertIsInstance(node, tbm.TrecEval)
 
     def test_anything_else_falls_back_to_a_generic_resource(self):
         node = v2.graph['trec-browser:trec28/decision/appendix.ICTNETv1BM25.pdf']

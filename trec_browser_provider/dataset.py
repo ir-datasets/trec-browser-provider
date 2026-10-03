@@ -54,6 +54,7 @@ This module lives in the ``trec-browser-provider`` package (a third-party
 ``ir_datasets.providers`` entry-point group.
 """
 import base64
+import collections
 import contextlib
 import gzip
 import hashlib
@@ -64,9 +65,9 @@ import os
 from ir_datasets import log as _ir_log
 from ir_datasets.util.download import Download, RequestsDownload
 
-from ir_datasets.v2.base import Generator, Param
-from ir_datasets.v2.formats import TrecEval, TrecScoredDocs
-from ir_datasets.v2.nodes import EvaluationTable, RESOURCE, Resource
+from ir_datasets.v2.base import Edge, Generator, Node, Param
+from ir_datasets.v2.formats import TrecScoredDocs
+from ir_datasets.v2.nodes import DERIVED_FROM, RESOURCE, Resource, TABLE, source_resources
 from ir_datasets.v2.sources import Source
 
 from .export import DEFAULT_INDEX_PATH
@@ -77,6 +78,57 @@ _logger = _ir_log.easy()
 #: Breuer, Voorhees, Soboroff. "Browsing and Searching Metadata of TREC."
 #: ICTIR '24 (co-located with SIGIR 2024), pp. 313-323.
 CITATION = 'doi:10.1145/3626772.3657873'
+
+#: A trec_eval summary table, as its own node type -- a local stand-in for
+#: ``ir_datasets.v2.nodes.EvaluationTable``/``ir_datasets.v2.formats.TrecEval``,
+#: which existed in an earlier snapshot of ir_datasets' v2 branch this module
+#: was first written against. That branch is still unstable (a single,
+#: repeatedly force-pushed WIP commit, with no history to recover an older
+#: implementation from -- see ``ir_datasets``'s own git log), and as of the
+#: snapshot this module currently installs against, the "evaluation" concept
+#: has been dropped there entirely, with nothing to replace it. Declaring our
+#: own node type here (``parent=TABLE``, as the module-level docstring on
+#: ``registry.ManifestProvider.node_type`` explicitly invites a third-party
+#: provider to do) keeps this provider working without waiting on upstream to
+#: restore (or permanently settle on dropping) that concept.
+EVALUATION_TABLE = trec_browser.node_type(
+    'EvaluationTable', parent=TABLE,
+    desc='A Table representing a trec_eval summary for one run: one row per '
+         '(measure, query_id) pair, plus an "all" row aggregating across '
+         'queries.')
+
+
+class TrecEvalMeasure(collections.namedtuple('TrecEvalMeasure', ['measure', 'query_id', 'value'])):
+    """One row of a ``trec_eval`` summary: a measure name, the query_id it was
+    computed for (or ``'all'`` for the aggregate row), and its value (left as
+    ``str`` -- trec_eval itself prints some measures, e.g. ``num_ret``, as
+    integers and others as floats, and this module has no need to pick a
+    single numeric type apart from what the text already says)."""
+    __slots__ = ()
+
+
+class TrecEval(Node):
+    """Parsed ``trec_eval`` summary output: whitespace-separated ``measure
+    query_id value`` rows, one per line (trec_eval's own plain-text summary
+    format, for both the standard and NIST's extended measure sets -- see
+    ``_summary`` below, this class's only caller)."""
+    type = EVALUATION_TABLE
+
+    def __init__(self, name, *, source, **meta):
+        self.source = source
+        self._structural = [Edge(DERIVED_FROM, r) for r in source_resources(source)]
+        super().__init__(name, **meta)
+
+    def structural_edges(self):
+        return list(self._structural)
+
+    def __iter__(self):
+        with self.source.stream() as stream:
+            for raw_line in stream:
+                line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
+                parts = line.split()
+                if len(parts) >= 3:
+                    yield TrecEvalMeasure(parts[0], parts[1], parts[2])
 
 #: Where NIST serves the actual (gated) run/summary files -- the browser
 #: site itself (pages.nist.gov/trec-browser/...) only ever links here.
@@ -400,7 +452,7 @@ if _RUN_PATHS:
         trec_browser.register_generator(Generator(
             '{summary_path}',
             params={'summary_path': Param(values=tuple(sorted(_SUMMARY_PATHS[_kind])))},
-            type=EvaluationTable.type,
+            type=EVALUATION_TABLE,
             resolver=lambda summary_path, _kind=_kind: _resolve_known_summary(_kind, summary_path),
             enumerable=True,
             row_metadata=lambda summary_path, _kind=_kind: _known_summary_row(_kind, summary_path),
@@ -424,7 +476,7 @@ for _kind in ('trec_eval', 'extended'):
     trec_browser.register_generator(Generator(
         '{track}/{subtrack}/summary.' + _kind + '.{run_id}',
         params={'track': _SEGMENT, 'subtrack': _SEGMENT, 'run_id': _RUN_ID},
-        type=EvaluationTable.type, resolver=lambda track, subtrack, run_id, _kind=_kind:
+        type=EVALUATION_TABLE, resolver=lambda track, subtrack, run_id, _kind=_kind:
             _summary(track, subtrack, _kind, run_id),
         enumerable=False,
         desc=f'The {_kind} trec_eval summary for a run, as linked from the '

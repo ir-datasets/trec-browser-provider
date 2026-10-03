@@ -1,0 +1,12 @@
+{
+  "name": "trec-browser-provider",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "postCreateCommand": "pip install --upgrade pip && pip install 'git+https://github.com/ir-datasets/ir-datasets.git@v2' && pip install -r requirements-test.txt && pip install -e .",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
+  }
+}
