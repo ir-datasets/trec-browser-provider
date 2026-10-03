@@ -33,4 +33,4 @@ jobs:
         context: .
         file: docker/graph-db.Dockerfile
         push: true
-        tags: ghcr.io/ir-datasets/ir-datasets.com:0.0.1-trec-browser
+        tags: ghcr.io/ir-datasets/trec-browser-provider:0.0.1-trec-browser
