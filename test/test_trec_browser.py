@@ -207,12 +207,49 @@ class TestV2TrecBrowser(unittest.TestCase):
         self.assertIsInstance(first, v2.Benchmark)
         self.assertIs(first, second)
 
-    def test_benchmarks_are_enumerable_with_row_metadata(self):
-        generators = [g for g in tbm.trec_browser.generators
-                      if g.node_type == v2.Benchmark.type and g.enumerable]
-        self.assertEqual(1, len(generators))
-        known = set(generators[0].params['benchmark_path'].values)
-        self.assertIn('trec28/decision', known)
+    def test_known_benchmarks_are_registered_eagerly(self):
+        # Eagerly registered (not via a lazy enumerable Generator, unlike
+        # every other known-index shape here) -- see `_MemberBenchmark`'s
+        # docstring for why: it is the only way a known Benchmark's real
+        # `structural_edges()` (including its `SUITE_MEMBER` edges) reaches
+        # `discover_edges()`/`build-graph-db`.
+        self.assertFalse([g for g in tbm.trec_browser.generators
+                          if g.node_type == v2.Benchmark.type and g.enumerable])
+        self.assertIn('trec-browser:trec28/decision', tbm.trec_browser.nodes)
+
+    def test_known_benchmark_structural_edges_include_its_runs_and_summaries(self):
+        node = v2.graph['trec-browser:trec28/decision']
+        members = {e.target for e in node.structural_edges()
+                  if e.kind == v2.SUITE_MEMBER}
+        # Bare (unqualified) names here: `structural_edges()` itself never
+        # qualifies its targets -- that happens once, in
+        # `ManifestProvider.register`/`_register_one`, when this exact live
+        # node was first eagerly registered.
+        self.assertIn('trec28/decision/input.ICTNETv1BM25.gz', members)
+        self.assertIn('trec28/decision/summary.trec_eval.ICTNETv1BM25', members)
+        self.assertIn('trec28/decision/summary.extended.ICTNETv1BM25', members)
+
+    def test_dynamic_benchmark_has_no_suite_member_edges(self):
+        node = v2.graph['trec-browser:trec99/madeup-subtrack']
+        self.assertEqual(
+            [], [e for e in node.structural_edges() if e.kind == v2.SUITE_MEMBER])
+
+    def test_known_run_discover_edges_report_a_derived_from_edge_to_its_raw_resource(self):
+        edges = {(src, kind, dst) for src, kind, dst in tbm.trec_browser.discover_edges()
+                if src == 'trec-browser:trec28/decision/input.ICTNETv1BM25.gz'}
+        self.assertIn(
+            ('trec-browser:trec28/decision/input.ICTNETv1BM25.gz',
+             'irds:derived_from',
+             'trec-browser:trec28/decision/input.ICTNETv1BM25.gz.raw'),
+            edges)
+
+    def test_known_benchmark_discover_edges_report_its_member_runs(self):
+        edges = {(src, kind, dst) for src, kind, dst in tbm.trec_browser.discover_edges()
+                if src == 'trec-browser:trec28/decision'}
+        self.assertIn(
+            ('trec-browser:trec28/decision', 'irds:member',
+             'trec-browser:trec28/decision/input.ICTNETv1BM25.gz'),
+            edges)
 
     def test_a_track_subtrack_not_in_the_index_still_gets_a_benchmark(self):
         node = v2.graph['trec-browser:trec99/madeup-subtrack']

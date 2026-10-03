@@ -83,7 +83,8 @@ from ir_datasets.v2.base import Edge, Generator, Node, Param
 from ir_datasets.v2.formats import TrecScoredDocs
 from ir_datasets.v2.graph import default_graph
 from ir_datasets.v2.nodes import (
-    Benchmark, DERIVED_FROM, RESOURCE, Resource, TABLE, source_resources)
+    Benchmark, DERIVED_FROM, RESOURCE, Resource, SUITE_MEMBER, TABLE,
+    source_resources)
 from ir_datasets.v2.sources import Source
 
 from .export import DEFAULT_INDEX_PATH
@@ -465,6 +466,46 @@ _BENCHMARK_PATHS = {
     f'{track}/{subtrack}': (track, subtrack)
     for (track, subtrack) in sorted({(t, s) for (t, s, _) in _STATIC_INDEX})}
 
+#: `(track, subtrack)` -> every run/summary name statically known to belong
+#: to it, sorted -- derived from `_RUN_PATHS`/`_SUMMARY_PATHS` (not
+#: recomputed from `_STATIC_INDEX` directly) so this always agrees with
+#: exactly what those generators actually register. Used to give a known
+#: Benchmark real `SUITE_MEMBER` edges (see `_MemberBenchmark` below):
+#: without this, `discover_edges()` (what `build-graph-db` reads -- see
+#: `registry.ManifestProvider.discover_edges`) never sees the
+#: benchmark-to-run/summary relationship at all, since it only reports
+#: edges a `Generator` declares via `edges=` (pure name-template
+#: substitution -- it cannot decompose a flat `run_path`/`summary_path`
+#: param back into the `track`/`subtrack` prefix a Benchmark's name needs),
+#: never a resolved node's own `structural_edges()` for a name that was
+#: never eagerly registered.
+_BENCHMARK_MEMBERS = collections.defaultdict(list)
+for _run_path, (_track, _subtrack, _run_id) in _RUN_PATHS.items():
+    _BENCHMARK_MEMBERS[(_track, _subtrack)].append(_run_path)
+for _kind in ('trec_eval', 'extended'):
+    for _summary_path, (_track, _subtrack, _run_id) in _SUMMARY_PATHS[_kind].items():
+        _BENCHMARK_MEMBERS[(_track, _subtrack)].append(_summary_path)
+_BENCHMARK_MEMBERS = {
+    key: tuple(sorted(members)) for key, members in _BENCHMARK_MEMBERS.items()}
+
+
+class _MemberBenchmark(Benchmark):
+    """A `Benchmark` that also knows which runs/summaries were submitted to
+    it, as `SUITE_MEMBER` edges -- reusing the same one-to-many "this set's
+    known members" edge kind `Suite` uses for its own fixed-at-construction
+    membership (see `nodes.Suite`), since core `Benchmark`'s facet model
+    (`docs`/`queries`/`qrels`/`scoreddocs`/`docpairs`, one node each) has no
+    slot for an unbounded "many runs were evaluated against this" relationship
+    of its own.
+    """
+    def __init__(self, name, *, members=(), **kwargs):
+        self._members = tuple(members)
+        super().__init__(name, **kwargs)
+
+    def structural_edges(self):
+        return [*super().structural_edges(),
+                *(Edge(SUITE_MEMBER, m) for m in self._members)]
+
 
 def _resolve_corpus_docs(dataset_id):
     """The corpus ``dataset_id`` (an ``ir_datasets`` id, as scraped into
@@ -509,20 +550,10 @@ def _benchmark(track, subtrack):
     ids = _BENCHMARK_IDS.get((track, subtrack))
     desc = (f'Every run/summary submitted to {track}/{subtrack}, as linked '
             'from the TREC Browser, bundled into one evaluable benchmark.')
-    return Benchmark(
+    return _MemberBenchmark(
         name, docs=_benchmark_corpus_docs(track, subtrack), desc=desc,
-        citation=CITATION, metadata={'ir_datasets_ids': ids} if ids else {})
-
-
-def _resolve_known_benchmark(benchmark_path):
-    track, subtrack = _BENCHMARK_PATHS[benchmark_path]
-    return _benchmark(track, subtrack)
-
-
-def _known_benchmark_row(benchmark_path):
-    track, subtrack = _BENCHMARK_PATHS[benchmark_path]
-    ids = _BENCHMARK_IDS.get((track, subtrack))
-    return {'ir_datasets_ids': ids} if ids else {}
+        citation=CITATION, metadata={'ir_datasets_ids': ids} if ids else {},
+        members=_BENCHMARK_MEMBERS.get((track, subtrack), ()))
 
 
 def _resolve_known_run(run_path):
@@ -615,6 +646,7 @@ if _RUN_PATHS:
         '{run_path}', params={'run_path': Param(values=tuple(sorted(_RUN_PATHS)))},
         type=TrecScoredDocs.type, resolver=_resolve_known_run, enumerable=True,
         row_metadata=_known_run_row,
+        edges=[(DERIVED_FROM, '{run_path}.raw')],
         desc='A run submitted to TREC, as linked from the TREC Browser, '
             'resolved against the package-shipped index (real MD5, '
             'participant, deep link) -- see '
@@ -627,24 +659,29 @@ if _RUN_PATHS:
             resolver=lambda summary_path, _kind=_kind: _resolve_known_summary(_kind, summary_path),
             enumerable=True,
             row_metadata=lambda summary_path, _kind=_kind: _known_summary_row(_kind, summary_path),
+            edges=[(DERIVED_FROM, '{summary_path}.raw')],
             desc=f'The {_kind} trec_eval summary for a run known to the '
                 'package-shipped index.'))
     # One Benchmark per `(track, subtrack)` known to the index -- every run/
     # summary registered above shares one of these names (see the module
-    # docstring's own note on this shape). Registered here too (alongside
-    # the tables above, before the dynamic fallbacks/catch-all) so it always
-    # wins with real `ir_datasets_ids`/`docs` metadata when available.
-    trec_browser.register_generator(Generator(
-        '{benchmark_path}',
-        params={'benchmark_path': Param(values=tuple(sorted(_BENCHMARK_PATHS)))},
-        type=Benchmark.type, resolver=_resolve_known_benchmark, enumerable=True,
-        row_metadata=_known_benchmark_row,
-        desc='Every run/summary submitted to one TREC track/subtrack known '
-            'to the package-shipped index, bundled into one evaluable '
-            'Benchmark -- its `docs` facet is the corpus it was run '
-            'against, resolved from a scraped `ir_datasets_ids` '
-            'cross-reference when exactly one distinct corpus is '
-            'identifiable.'))
+    # docstring's own note on this shape). Registered *eagerly* here (not
+    # via a lazy `Generator`, unlike every other shape in this module) --
+    # there are only ~170 of these (one per track/subtrack, not one per
+    # run), so building all of them up front is cheap, and it is the only
+    # way their real `structural_edges()` (including the `SUITE_MEMBER`
+    # edges to every run/summary submitted to them -- see
+    # `_MemberBenchmark`) reaches `discover_edges()`/`build-graph-db`:
+    # that only reads a *resolved* node's own edges for a name already in
+    # `self.nodes`, or a `Generator`'s own `edges=` template for one that
+    # isn't -- and a flat `run_path`/`summary_path` param can't be templated
+    # back down to the `track/subtrack` prefix a Benchmark edge would need.
+    # Registered before the dynamic fallback below, so a known track/subtrack
+    # always resolves with its real `ir_datasets_ids`/`docs`/members first
+    # (`self.nodes` is checked before any generator -- see
+    # `registry.ManifestProvider.__getitem__`).
+    trec_browser.register(*(
+        _benchmark(track, subtrack)
+        for (track, subtrack) in sorted(_BENCHMARK_PATHS.values())))
     # The ``.raw`` Resource backing each table above (see
     # ``_run_resource``/``_summary_resource``'s own docstrings) -- registered
     # too, so looking that name up *directly* (not just as a side effect of
@@ -677,6 +714,7 @@ trec_browser.register_generator(Generator(
     '{track}/{subtrack}/input.{run_id}.gz',
     params={'track': _SEGMENT, 'subtrack': _SEGMENT, 'run_id': _RUN_ID},
     type=TrecScoredDocs.type, resolver=_run, enumerable=False,
+    edges=[(DERIVED_FROM, '{track}/{subtrack}/input.{run_id}.gz.raw')],
     desc='A run submitted to TREC, as linked from the TREC Browser, not (yet) '
         'in the package-shipped index -- resolves directly to a parsed '
         'scoreddocs table, without the extra metadata an indexed run gets.'))
@@ -688,18 +726,22 @@ for _kind in ('trec_eval', 'extended'):
         type=EVALUATION_TABLE, resolver=lambda track, subtrack, run_id, _kind=_kind:
             _summary(track, subtrack, _kind, run_id),
         enumerable=False,
+        edges=[(DERIVED_FROM,
+               '{track}/{subtrack}/summary.' + _kind + '.{run_id}.raw')],
         desc=f'The {_kind} trec_eval summary for a run, as linked from the '
             'TREC Browser.'))
 
-# Same shape as the index-backed Benchmark generator above, pattern-matched
-# instead of listed -- covers any `(track, subtrack)` not (yet) in the
-# static index, same "every run belongs to a benchmark" guarantee, just
-# without `ir_datasets_ids`/a `docs` facet to offer (nothing in the static
-# index to resolve them from). Registered after the index-backed one (so a
-# known track/subtrack always resolves with its real metadata first), but
-# before the final catch-all -- and, since no real NIST file ever lives at
-# a bare `track/subtrack` (every actual path has a filename too), this can
-# never shadow an actual resource.
+# Same shape as the index-backed Benchmark above, pattern-matched instead of
+# eagerly listed (there is no bounded set of *unknown* track/subtracks to
+# enumerate) -- covers any `(track, subtrack)` not (yet) in the static
+# index, same "every run belongs to a benchmark" guarantee, just without
+# `ir_datasets_ids`/a `docs` facet or `SUITE_MEMBER` edges to offer (nothing
+# in the static index to resolve any of those from -- see
+# `_BENCHMARK_MEMBERS`/`_benchmark`). Registered after the index-backed one
+# (so a known track/subtrack always resolves with its real metadata first),
+# but before the final catch-all -- and, since no real NIST file ever lives
+# at a bare `track/subtrack` (every actual path has a filename too), this
+# can never shadow an actual resource.
 trec_browser.register_generator(Generator(
     '{track}/{subtrack}', params={'track': _SEGMENT, 'subtrack': _SEGMENT},
     type=Benchmark.type, resolver=_benchmark, enumerable=False,
