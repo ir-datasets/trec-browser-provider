@@ -1,4 +1,4 @@
-# A Provider that integrates the Trec Browser into ir-datasets
+# An ir_datasets Provider for the Trec Browser
 
 This allows to use runs and or evaluations from the [TREC Browser](https://pages.nist.gov/trec-browser/) in ir_datasets.
 
