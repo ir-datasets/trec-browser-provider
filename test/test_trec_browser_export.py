@@ -214,6 +214,72 @@ class TestRunIdNeverContainsWhitespace(unittest.TestCase):
         self.assertEqual([], offenders)
 
 
+#: Unlike `_WHITESPACE_RUN_ID_FIXTURE`/`_UNESCAPED_SPACE_RUN_ID_FIXTURE`
+#: above (a free-text "Run ID" bullet with a space, correctly bypassed in
+#: favor of the hosted filename), this fixture's *gated href itself* has an
+#: unescaped, literal space in its track/subtrack path segment -- NIST is
+#: just as inconsistent about escaping this as it is about escaping the
+#: run_id filename segment (see `_UNESCAPED_SPACE_RUN_ID_FIXTURE`'s own
+#: comment), so the same class of bug applies one path segment over:
+#: `results_track`/`results_subtrack`, pulled straight out of the href by
+#: `_RESULTS_PATH_RE` with no run_id-style normalization, used to leak that
+#: raw whitespace straight into the `trec-browser:` node name
+#: (`_path(track, subtrack, ...)` in dataset.py).
+_WHITESPACE_TRACK_PAGE_URL = 'https://pages.nist.gov/trec-browser/trec99/made-up-track/runs/'
+_WHITESPACE_TRACK_FIXTURE = '''
+<html><body>
+<h1 id="runs-made-up-track-2025">Runs - Made Up Track 2025</h1>
+<h4 id="somerun">SomeRun</h4>
+<p><a href="https://trec.nist.gov/results/trec99/made up track/input.SomeRun.gz"><code>Input</code></a></p>
+<ul>
+<li><strong>Run ID:</strong> SomeRun</li>
+<li><strong>Participant:</strong> SomeTeam</li>
+<li><strong>Track:</strong> Made Up Track</li>
+<li><strong>Year:</strong> 2025</li>
+</ul>
+</body></html>
+'''
+
+
+class TestResultsTrackSubtrackNeverContainWhitespace(unittest.TestCase):
+    """Regression tests for the same class of bug as
+    ``TestRunIdNeverContainsWhitespace``, one path segment over: NIST's
+    gated href can leave a literal, unescaped space in the track/subtrack
+    segment too, not just the run_id filename segment -- and unlike
+    `run_id` (normalized via `_normalize_path_segment` in
+    `_run_id_from_links`), `results_track`/`results_subtrack` used to be
+    taken verbatim from `_RESULTS_PATH_RE`'s match groups, leaking raw
+    whitespace straight into the `trec-browser:` node name built from them."""
+
+    def setUp(self):
+        self.records = list(tbe.parse_run_listing(
+            _WHITESPACE_TRACK_FIXTURE.encode('utf-8'), _WHITESPACE_TRACK_PAGE_URL))
+
+    def test_results_subtrack_has_no_whitespace(self):
+        self.assertNotRegex(self.records[0]['results_subtrack'], r'\s')
+
+    def test_results_subtrack_is_percent_encoded(self):
+        self.assertEqual('made%20up%20track', self.records[0]['results_subtrack'])
+
+    def test_results_track_unaffected_when_space_free(self):
+        self.assertEqual('trec99', self.records[0]['results_track'])
+
+    def test_build_index_key_has_no_whitespace(self):
+        index = tbe.build_index(self.records)
+        [key] = index.keys()
+        self.assertFalse(any(part and re.search(r'\s', part) for part in key))
+
+    def test_no_shipped_track_or_subtrack_in_the_static_index_contains_whitespace(self):
+        """Same guard as ``test_no_shipped_run_id_in_the_static_index_contains_whitespace``,
+        but for the other two components of the shipped static index's key."""
+        from trec_browser_provider import dataset as tbm
+        index = tbm._load_static_index(tbm.DEFAULT_INDEX_PATH)
+        offenders = [key for key in index
+                    if (key[0] and re.search(r'\s', key[0]))
+                    or (key[1] and re.search(r'\s', key[1]))]
+        self.assertEqual([], offenders)
+
+
 #: A `.../data/` page with the `ir_datasets` cross-reference bullet (two
 #: links, same real DOM shape as `trec29/deep/data/`) plus the other,
 #: unrelated bullets (`Corpus`/`Topics`/`Qrels`) a real page also has -- the

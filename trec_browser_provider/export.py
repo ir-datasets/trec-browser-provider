@@ -97,6 +97,19 @@ _RUN_ID_FROM_LINK_RES = {
 }
 
 
+def _normalize_path_segment(segment):
+    """Unquote-then-requote a single URL path segment pulled off a scraped
+    href -- NIST's own HTML is inconsistent about whether a path-unsafe
+    character (chiefly a space) is percent-encoded in the href at all, so
+    round-tripping through unquote/quote first undoes any existing
+    encoding, then re-applies it uniformly. Used for every segment that
+    ends up in a `trec-browser:` node name (`run_id` below, and
+    `results_track`/`results_subtrack` in ``parse_run_listing``) -- the
+    result is always whitespace-free and stable no matter which way the
+    source href happened to be written."""
+    return urllib.parse.quote(urllib.parse.unquote(segment), safe='')
+
+
 def _run_id_from_links(links):
     """The hosted-filename-derived run id (see ``_RUN_ID_FROM_LINK_RES``),
     checked in the same link-priority order as ``results_path`` below --
@@ -115,7 +128,7 @@ def _run_id_from_links(links):
             continue
         m = pattern.search(href)
         if m:
-            return urllib.parse.quote(urllib.parse.unquote(m.group('run_id')), safe='')
+            return _normalize_path_segment(m.group('run_id'))
     return None
 
 
@@ -188,9 +201,15 @@ def parse_run_listing(content, page_url):
         results_path = next(
             (links[k] for k in ('input', 'summary_trec_eval', 'summary_extended')
              if k in links), None)
+        # Normalized the same way as `run_id` above (see
+        # `_normalize_path_segment`'s own docstring): NIST's gated href can
+        # leave a track/subtrack path segment with a literal, unescaped
+        # space too (not just the run_id filename segment), which would
+        # otherwise leak raw whitespace into the `trec-browser:` node name
+        # built from it (`_path(track, subtrack, ...)` in dataset.py).
         m = _RESULTS_PATH_RE.match(results_path) if results_path else None
-        record['results_track'] = m.group(1) if m else None
-        record['results_subtrack'] = m.group(2) if m else None
+        record['results_track'] = _normalize_path_segment(m.group(1)) if m else None
+        record['results_subtrack'] = _normalize_path_segment(m.group(2)) if m else None
         yield record
 
 
