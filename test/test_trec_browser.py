@@ -155,6 +155,117 @@ class TestV2TrecBrowser(unittest.TestCase):
         raw = tbm.trec_browser.nodes['trec-browser:trec28/decision/input.ICTNETv1BM25.gz.raw']
         self.assertIsInstance(raw, tbm._SoftHashResource)
 
+    def test_a_known_runs_raw_resource_has_its_real_md5_even_looked_up_first(self):
+        # Regression test: before the dedicated `{run_path}.raw`/
+        # `{summary_path}.raw` generators were added, this exact name (the
+        # same one the run's own TrecScoredDocs table registers its
+        # backing Resource under -- see `_run_resource`'s docstring) had no
+        # generator of its own. Looked up *before* its parent table (so
+        # nothing has registered the real node under this name yet), it
+        # silently fell through every specific generator straight to the
+        # final catch-all -- which has no access to the static index -- and
+        # returned a bare, un-hashed placeholder Resource instead (losing
+        # the real MD5 check entirely). Uses a run untouched by any other
+        # test in this module, so this is a genuine first-touch lookup, not
+        # one relying on some earlier test having resolved the parent first.
+        raw = v2.graph['trec-browser:trec28/decision/input.ICTNETv2BM25.gz.raw']
+        self.assertEqual('ea99347ee90002688da206d6915d8880', raw.md5)
+        self.assertIsInstance(raw, tbm._SoftHashResource)
+
+    def test_a_known_summarys_raw_resource_has_its_real_md5_even_looked_up_first(self):
+        raw = v2.graph[
+            'trec-browser:trec28/decision/summary.trec_eval.ICTNETv2BM25.raw']
+        self.assertEqual('ea99347ee90002688da206d6915d8880', raw.md5)
+
+    def test_a_dynamic_runs_raw_resource_is_not_the_generic_catch_all(self):
+        # Not in the static index, so no MD5 to lose either way -- but this
+        # must still resolve via the dedicated dynamic `.raw` generator
+        # (the same URL the parsed table itself would use), not the
+        # catch-all's `_generic` (whose own, differently-worded `desc`
+        # would otherwise leak onto a recognized run/summary shape).
+        raw = v2.graph[
+            'trec-browser:trec99/madeup-subtrack/input.NOT_IN_INDEX.gz.raw']
+        self.assertEqual(
+            'https://trec.nist.gov/results/trec99/madeup-subtrack/'
+            'input.NOT_IN_INDEX.gz', raw.sources[0].url)
+        self.assertIsInstance(raw, tbm._SoftHashResource)
+
+    def test_an_unrecognized_shape_still_falls_back_to_the_generic_resource(self):
+        # Guards against the fix above over-matching: a shape with no
+        # dedicated generator at all (not a run/summary file, `.raw` or
+        # not) must still reach the final catch-all.
+        node = v2.graph['trec-browser:trec28/decision/appendix.ICTNETv2BM25.pdf']
+        self.assertIsInstance(node, v2.Resource)
+        self.assertEqual({}, node.hashes)
+
+    def test_runs_of_the_same_track_belong_to_the_same_benchmark(self):
+        # Looked up twice (once as a side effect of discussing "the"
+        # benchmark for this track/subtrack, once directly): both must be
+        # the very same node, not one freshly built per run/summary.
+        first = v2.graph['trec-browser:trec28/decision']
+        second = v2.graph['trec-browser:trec28/decision']
+        self.assertIsInstance(first, v2.Benchmark)
+        self.assertIs(first, second)
+
+    def test_benchmarks_are_enumerable_with_row_metadata(self):
+        generators = [g for g in tbm.trec_browser.generators
+                      if g.node_type == v2.Benchmark.type and g.enumerable]
+        self.assertEqual(1, len(generators))
+        known = set(generators[0].params['benchmark_path'].values)
+        self.assertIn('trec28/decision', known)
+
+    def test_a_track_subtrack_not_in_the_index_still_gets_a_benchmark(self):
+        node = v2.graph['trec-browser:trec99/madeup-subtrack']
+        self.assertIsInstance(node, v2.Benchmark)
+        self.assertNotIn('ir_datasets_ids', node.metadata)
+
+    def test_benchmark_surfaces_ir_datasets_ids_when_known(self):
+        with mock.patch.dict(
+                tbm._BENCHMARK_IDS,
+                {('trec29', 'deep'): ['msmarco-passage-v2/trec-dl-2020']}):
+            node = tbm._benchmark('trec29', 'deep')
+        self.assertEqual(
+            ['msmarco-passage-v2/trec-dl-2020'], node.metadata['ir_datasets_ids'])
+
+    def test_benchmark_has_no_ir_datasets_ids_key_when_unknown(self):
+        node = tbm._benchmark('trec99', 'madeup-subtrack')
+        self.assertNotIn('ir_datasets_ids', node.metadata)
+
+    def test_benchmark_docs_facet_resolves_a_single_known_corpus(self):
+        fake_docs = mock.Mock()
+        fake_node = mock.Mock(docs=fake_docs)
+        fake_graph = mock.Mock()
+        fake_graph.__getitem__ = mock.Mock(side_effect={
+            'some-corpus/some-year': fake_node}.__getitem__)
+        with mock.patch.object(tbm, 'default_graph', lambda: fake_graph), \
+                mock.patch.dict(
+                    tbm._BENCHMARK_IDS, {('trec29', 'deep'): ['some-corpus/some-year']}):
+            node = tbm._benchmark('trec29', 'deep')
+        self.assertIs(fake_docs, node.docs)
+
+    def test_benchmark_docs_facet_unset_when_ids_resolve_to_different_corpora(self):
+        doc_a, doc_b = mock.Mock(), mock.Mock()
+        doc_a.name, doc_b.name = 'irds:corpus-a', 'irds:corpus-b'
+        fake_graph = mock.Mock()
+        fake_graph.__getitem__ = mock.Mock(side_effect={
+            'corpus-a/x': mock.Mock(docs=doc_a),
+            'corpus-b/y': mock.Mock(docs=doc_b)}.__getitem__)
+        with mock.patch.object(tbm, 'default_graph', lambda: fake_graph), \
+                mock.patch.dict(
+                    tbm._BENCHMARK_IDS,
+                    {('trec29', 'deep'): ['corpus-a/x', 'corpus-b/y']}):
+            node = tbm._benchmark('trec29', 'deep')
+        self.assertIsNone(node.docs)
+
+    def test_benchmark_docs_facet_unset_when_an_id_cannot_be_resolved(self):
+        fake_graph = mock.Mock()
+        fake_graph.__getitem__ = mock.Mock(side_effect=KeyError('nope'))
+        with mock.patch.object(tbm, 'default_graph', lambda: fake_graph), \
+                mock.patch.dict(
+                    tbm._BENCHMARK_IDS, {('trec29', 'deep'): ['unknown/id']}):
+            node = tbm._benchmark('trec29', 'deep')
+        self.assertIsNone(node.docs)
+
     def test_soft_hash_resource_never_passes_hash_to_the_v1_download(self):
         # The hard-fail check lives in the v1 Download (util/download.py);
         # a _SoftHashResource must never hand it a hash to enforce -- see

@@ -26,7 +26,21 @@ One Generator per filename shape NIST uses under ``results/<track>/
   that run, standard measures only.
 * ``summary.extended.<run_id>``    -- same, NIST's extended measure set.
 
-These three cover every example the module was asked for; everything else
+A fourth, synthetic shape -- ``<track>/<subtrack>`` (just the two directory
+segments, no filename) -- resolves to a ``Benchmark`` node: every run/summary
+sharing that ``track``/``subtrack`` was submitted to the same TREC task, so
+they belong to the same evaluable benchmark, not separate ones. This name
+never collides with a real NIST file (every actual ``results/`` path has a
+filename too, i.e. a third segment). The corpus the track was run against
+(a ``docs`` facet) is filled in *when possible*: the TREC Browser's own
+``.../data/`` pages sometimes cross-reference the ``ir_datasets`` id(s) of
+that corpus (see ``export.py``'s own docstring, and the ``ir_datasets_ids``
+scraped field) -- resolved lazily, the same ``ir_datasets.load(...)`` id a
+caller would use, and left unset (not an error) whenever that cross-reference
+is missing, ambiguous (more than one distinct corpus listed), or simply not
+(yet) known to this branch of ``ir_datasets.v2``.
+
+These four cover every example the module was asked for; everything else
 under ``results/`` (appendices, proceedings PDFs, ...) still resolves, via a
 catch-all generator registered last (first-match-wins order -- see
 ``base.Generator``/``registry.ManifestProvider.__getitem__``), to a bare
@@ -67,7 +81,9 @@ from ir_datasets.util.download import Download, RequestsDownload
 
 from ir_datasets.v2.base import Edge, Generator, Node, Param
 from ir_datasets.v2.formats import TrecScoredDocs
-from ir_datasets.v2.nodes import DERIVED_FROM, RESOURCE, Resource, TABLE, source_resources
+from ir_datasets.v2.graph import default_graph
+from ir_datasets.v2.nodes import (
+    Benchmark, DERIVED_FROM, RESOURCE, Resource, TABLE, source_resources)
 from ir_datasets.v2.sources import Source
 
 from .export import DEFAULT_INDEX_PATH
@@ -303,23 +319,33 @@ def _scraped_metadata(record):
             if record.get(key)}
 
 
-def _run(track, subtrack, run_id, record=None):
+def _run_resource(track, subtrack, run_id, record=None):
+    """The raw gated Resource a run's own parsed ``TrecScoredDocs`` table
+    (``_run``, below) is built from -- factored out so the dedicated
+    ``...input.{run_id}.gz.raw`` generators (registered below, alongside
+    ``_run``'s own) can build/resolve *exactly* the same, real-MD5-bearing
+    Resource a direct name lookup expects, instead of silently falling
+    through to the generic catch-all's hash-less placeholder (see those
+    generators' own docstring for why that fallback would otherwise win)."""
     name = _path(track, subtrack, f'input.{run_id}.gz')
-    # The backing raw Resource gets its own, distinct *name* (`.raw` suffix)
-    # but the *same* real URL: the user-facing name (`name`, the literal
-    # results/ path) belongs to the parsed TrecScoredDocs table below, not to
-    # the bytes it's parsed from -- reusing one name for both would make the
-    # table's own `derived_from` edge (added by Table.__init__ via
+    resource_kwargs = {}
+    if record and record.get('md5'):
+        resource_kwargs['hash'] = f"md5:{record['md5']}"
+    # The resource gets its own, distinct *name* (`.raw` suffix) but the
+    # *same* real URL: the user-facing name (`name`, the literal results/
+    # path) belongs to the parsed TrecScoredDocs table, not to the bytes
+    # it's parsed from -- reusing one name for both would make the table's
+    # own `derived_from` edge (added by Table.__init__ via
     # source_resources(source)) register a second, different node under the
     # same qualified name, silently clobbering whichever of the two was
     # registered second (see registry.ManifestProvider._register_one).
-    resource_kwargs = {}
-    extra_meta = {}
-    if record:
-        if record.get('md5'):
-            resource_kwargs['hash'] = f"md5:{record['md5']}"
-        extra_meta.update(_scraped_metadata(record))
-    resource = _gated_resource(f'{name}.raw', url_path=name, **resource_kwargs)
+    return _gated_resource(f'{name}.raw', url_path=name, **resource_kwargs)
+
+
+def _run(track, subtrack, run_id, record=None):
+    name = _path(track, subtrack, f'input.{run_id}.gz')
+    resource = _run_resource(track, subtrack, run_id, record)
+    extra_meta = _scraped_metadata(record) if record else {}
     desc = (f'Run {run_id!r}, submitted to {track}/{subtrack} -- '
             'downloaded and parsed from the TREC Browser-linked run file at '
             f'{_RESULTS_BASE_URL}{name}.')
@@ -333,24 +359,27 @@ def _run(track, subtrack, run_id, record=None):
         **table_kwargs)
 
 
+def _summary_resource(track, subtrack, kind, run_id, record=None):
+    """The raw gated Resource a summary's own parsed ``TrecEval`` table
+    (``_summary``, below) is built from -- same reasoning/role as
+    ``_run_resource``'s own docstring."""
+    name = _path(track, subtrack, f'summary.{kind}.{run_id}')
+    resource_kwargs = {}
+    if record and record.get('md5'):
+        resource_kwargs['hash'] = f"md5:{record['md5']}"
+    return _gated_resource(f'{name}.raw', url_path=name, **resource_kwargs)
+
+
 def _summary(track, subtrack, kind, run_id, record=None):
     name = _path(track, subtrack, f'summary.{kind}.{run_id}')
     label = 'standard' if kind == 'trec_eval' else 'extended'
     desc = (f'The {label} trec_eval summary for run {run_id!r}, submitted '
             f'to {track}/{subtrack} -- parsed as trec_eval `measure qid '
             'value` rows.')
-    # The backing raw Resource gets its own, distinct *name* (`.raw` suffix,
-    # same reasoning as `_run`'s) since the user-facing name belongs to the
-    # parsed TrecEval table below, not to the bytes it's parsed from.
-    resource_kwargs = {}
-    extra_meta = {}
-    if record:
-        if record.get('md5'):
-            resource_kwargs['hash'] = f"md5:{record['md5']}"
-        extra_meta.update(_scraped_metadata(record))
-        if record.get('description'):
-            desc += f" {record['description']}"
-    resource = _gated_resource(f'{name}.raw', url_path=name, **resource_kwargs)
+    resource = _summary_resource(track, subtrack, kind, run_id, record)
+    extra_meta = _scraped_metadata(record) if record else {}
+    if record and record.get('description'):
+        desc += f" {record['description']}"
     table_kwargs = {'metadata': extra_meta} if extra_meta else {}
     return TrecEval(name, source=resource, desc=desc, citation=CITATION,
                      **table_kwargs)
@@ -415,6 +444,86 @@ _SUMMARY_PATHS = {
         for (track, subtrack, run_id) in _STATIC_INDEX}
     for _kind in ('trec_eval', 'extended')}
 
+#: `(track, subtrack)` -> the `ir_datasets_ids` scraped for that pair (see
+#: export.py's `build_dataset_index`/`trimmed_rows`), one entry per pair that
+#: actually has a cross-reference -- taken from whichever record happens to
+#: carry it first; every run sharing a `(track, subtrack)` was scraped with
+#: the same value (it comes from that pair's own `.../data/` page, not the
+#: individual run), so it makes no difference which record "wins".
+_BENCHMARK_IDS = {}
+for (_track, _subtrack, _run_id), _record in _STATIC_INDEX.items():
+    _key = (_track, _subtrack)
+    if _key not in _BENCHMARK_IDS and _record.get('ir_datasets_ids'):
+        _BENCHMARK_IDS[_key] = list(_record['ir_datasets_ids'])
+
+#: `'{track}/{subtrack}'` -> `(track, subtrack)`, one entry per pair with at
+#: least one statically-known run -- same flat-Param reasoning as
+#: `_RUN_PATHS`'s own docstring (a 2-Param cross product here would be much
+#: smaller, but still needlessly produces `(track, subtrack)` combinations
+#: that were never actually submitted to).
+_BENCHMARK_PATHS = {
+    f'{track}/{subtrack}': (track, subtrack)
+    for (track, subtrack) in sorted({(t, s) for (t, s, _) in _STATIC_INDEX})}
+
+
+def _resolve_corpus_docs(dataset_id):
+    """The corpus ``dataset_id`` (an ``ir_datasets`` id, as scraped into
+    ``ir_datasets_ids`` -- see export.py) resolves to, as a ``DocTable`` --
+    best-effort, never raising: ``dataset_id`` is a bare name, resolved the
+    same way ``default_graph()`` resolves any other bare name (``irds:``
+    first, then ``legacy:`` -- see ``graph.Graph._load_bare``), which is
+    exactly how ``ir_datasets.load(dataset_id)`` would address it too. Returns
+    ``None`` (not an error) if this branch of ``ir_datasets.v2`` doesn't (yet)
+    know that id, or knows it but it has no ``docs`` facet of its own --
+    the same "extracted when possible" spirit ``ir_datasets_ids`` itself
+    already has."""
+    try:
+        node = default_graph()[dataset_id]
+    except KeyError:
+        return None
+    return getattr(node, 'docs', None)
+
+
+def _benchmark_corpus_docs(track, subtrack):
+    """The single corpus ``track``/``subtrack``'s runs were evaluated
+    against, if every ``ir_datasets_ids`` cross-reference for that pair
+    resolves to the *same* ``docs`` table -- ``None`` if there is no
+    cross-reference at all, none of them resolve, or they resolve to more
+    than one distinct corpus (ambiguous: picking one over the others would
+    just be a guess)."""
+    ids = _BENCHMARK_IDS.get((track, subtrack))
+    if not ids:
+        return None
+    resolved = {}
+    for dataset_id in ids:
+        docs = _resolve_corpus_docs(dataset_id)
+        if docs is not None:
+            resolved[docs.name] = docs
+    if len(resolved) == 1:
+        return next(iter(resolved.values()))
+    return None
+
+
+def _benchmark(track, subtrack):
+    name = f'{track}/{subtrack}'
+    ids = _BENCHMARK_IDS.get((track, subtrack))
+    desc = (f'Every run/summary submitted to {track}/{subtrack}, as linked '
+            'from the TREC Browser, bundled into one evaluable benchmark.')
+    return Benchmark(
+        name, docs=_benchmark_corpus_docs(track, subtrack), desc=desc,
+        citation=CITATION, metadata={'ir_datasets_ids': ids} if ids else {})
+
+
+def _resolve_known_benchmark(benchmark_path):
+    track, subtrack = _BENCHMARK_PATHS[benchmark_path]
+    return _benchmark(track, subtrack)
+
+
+def _known_benchmark_row(benchmark_path):
+    track, subtrack = _BENCHMARK_PATHS[benchmark_path]
+    ids = _BENCHMARK_IDS.get((track, subtrack))
+    return {'ir_datasets_ids': ids} if ids else {}
+
 
 def _resolve_known_run(run_path):
     track, subtrack, run_id = _RUN_PATHS[run_path]
@@ -450,6 +559,53 @@ def _known_summary_row(kind, summary_path):
     return row
 
 
+#: ``{run_path}``/``{summary_path}`` + literal ``.raw`` -- the name a run's
+#: or summary's own backing Resource is registered under (see
+#: ``_run_resource``/``_summary_resource``'s own docstrings), reused here so
+#: that name also resolves correctly -- real MD5, no generic placeholder --
+#: when looked up *directly*, not just as a side effect of resolving the
+#: parsed table first. Without a dedicated generator for it, a bare
+#: ``{path}`` lookup of e.g. ``track/subtrack/input.run_id.gz.raw`` would
+#: fall through every more specific generator below (none of their patterns
+#: end in ``.gz``/``summary.*`` *plus* ``.raw``) straight to the final
+#: catch-all -- which has no way to know the real MD5/scraped metadata, and
+#: would silently hand back a bare, unverified Resource instead. The
+#: enumerable Param below reuses ``_RUN_PATHS``/``_SUMMARY_PATHS``' own
+#: values (the bare, no-``.raw`` path) since that's what the generator's
+#: ``run_path``/``summary_path`` param is bound to -- the literal ``.raw``
+#: suffix lives in the template, not the enumerated values themselves.
+
+
+def _resolve_known_run_raw(run_path):
+    track, subtrack, run_id = _RUN_PATHS[run_path]
+    return _run_resource(track, subtrack, run_id,
+                         record=_STATIC_INDEX[(track, subtrack, run_id)])
+
+
+def _known_run_raw_row(run_path):
+    track, subtrack, run_id = _RUN_PATHS[run_path]
+    record = _STATIC_INDEX[(track, subtrack, run_id)]
+    if not record.get('md5'):
+        return {}
+    return {'validation': {'type': 'file_hash',
+                           'hashes': [f"md5:{record['md5']}"]}}
+
+
+def _resolve_known_summary_raw(kind, summary_path):
+    track, subtrack, run_id = _SUMMARY_PATHS[kind][summary_path]
+    return _summary_resource(track, subtrack, kind, run_id,
+                             record=_STATIC_INDEX[(track, subtrack, run_id)])
+
+
+def _known_summary_raw_row(kind, summary_path):
+    track, subtrack, run_id = _SUMMARY_PATHS[kind][summary_path]
+    record = _STATIC_INDEX[(track, subtrack, run_id)]
+    if not record.get('md5'):
+        return {}
+    return {'validation': {'type': 'file_hash',
+                           'hashes': [f"md5:{record['md5']}"]}}
+
+
 if _RUN_PATHS:
     # Index-backed, enumerable: real metadata (MD5, participant, a deep link
     # back to the live browser page) for every run known as of the last
@@ -473,6 +629,44 @@ if _RUN_PATHS:
             row_metadata=lambda summary_path, _kind=_kind: _known_summary_row(_kind, summary_path),
             desc=f'The {_kind} trec_eval summary for a run known to the '
                 'package-shipped index.'))
+    # One Benchmark per `(track, subtrack)` known to the index -- every run/
+    # summary registered above shares one of these names (see the module
+    # docstring's own note on this shape). Registered here too (alongside
+    # the tables above, before the dynamic fallbacks/catch-all) so it always
+    # wins with real `ir_datasets_ids`/`docs` metadata when available.
+    trec_browser.register_generator(Generator(
+        '{benchmark_path}',
+        params={'benchmark_path': Param(values=tuple(sorted(_BENCHMARK_PATHS)))},
+        type=Benchmark.type, resolver=_resolve_known_benchmark, enumerable=True,
+        row_metadata=_known_benchmark_row,
+        desc='Every run/summary submitted to one TREC track/subtrack known '
+            'to the package-shipped index, bundled into one evaluable '
+            'Benchmark -- its `docs` facet is the corpus it was run '
+            'against, resolved from a scraped `ir_datasets_ids` '
+            'cross-reference when exactly one distinct corpus is '
+            'identifiable.'))
+    # The ``.raw`` Resource backing each table above (see
+    # ``_run_resource``/``_summary_resource``'s own docstrings) -- registered
+    # too, so looking that name up *directly* (not just as a side effect of
+    # resolving the parsed table first) still gets the real MD5, instead of
+    # silently falling through to the generic catch-all below.
+    trec_browser.register_generator(Generator(
+        '{run_path}.raw',
+        params={'run_path': Param(values=tuple(sorted(_RUN_PATHS)))},
+        type=RESOURCE, resolver=_resolve_known_run_raw, enumerable=True,
+        row_metadata=_known_run_raw_row,
+        desc='The raw, unparsed run file a known run\'s TrecScoredDocs '
+            'table is parsed from.'))
+    for _kind in ('trec_eval', 'extended'):
+        trec_browser.register_generator(Generator(
+            '{summary_path}.raw',
+            params={'summary_path': Param(values=tuple(sorted(_SUMMARY_PATHS[_kind])))},
+            type=RESOURCE,
+            resolver=lambda summary_path, _kind=_kind: _resolve_known_summary_raw(_kind, summary_path),
+            enumerable=True,
+            row_metadata=lambda summary_path, _kind=_kind: _known_summary_raw_row(_kind, summary_path),
+            desc=f'The raw, unparsed {_kind} summary file a known '
+                'summary\'s TrecEval table is parsed from.'))
 
 # Dynamic fallback: the same three shapes, pattern-matched instead of listed
 # -- covers any run/summary added to the live site since the index was last
@@ -496,6 +690,45 @@ for _kind in ('trec_eval', 'extended'):
         enumerable=False,
         desc=f'The {_kind} trec_eval summary for a run, as linked from the '
             'TREC Browser.'))
+
+# Same shape as the index-backed Benchmark generator above, pattern-matched
+# instead of listed -- covers any `(track, subtrack)` not (yet) in the
+# static index, same "every run belongs to a benchmark" guarantee, just
+# without `ir_datasets_ids`/a `docs` facet to offer (nothing in the static
+# index to resolve them from). Registered after the index-backed one (so a
+# known track/subtrack always resolves with its real metadata first), but
+# before the final catch-all -- and, since no real NIST file ever lives at
+# a bare `track/subtrack` (every actual path has a filename too), this can
+# never shadow an actual resource.
+trec_browser.register_generator(Generator(
+    '{track}/{subtrack}', params={'track': _SEGMENT, 'subtrack': _SEGMENT},
+    type=Benchmark.type, resolver=_benchmark, enumerable=False,
+    desc='Every run/summary submitted to one TREC track/subtrack not (yet) '
+        'in the package-shipped index, bundled into one evaluable '
+        'Benchmark, without the extra metadata an indexed track/subtrack '
+        'gets.'))
+
+# The ``.raw`` Resource backing each dynamic-shape table above -- same
+# reasoning as the index-backed ``.raw`` generators above: without these,
+# a direct lookup of e.g. `track/subtrack/input.run_id.gz.raw` for a run
+# not in the static index would still fall through to the generic
+# catch-all below, same bug, just without an MD5 to lose.
+trec_browser.register_generator(Generator(
+    '{track}/{subtrack}/input.{run_id}.gz.raw',
+    params={'track': _SEGMENT, 'subtrack': _SEGMENT, 'run_id': _RUN_ID},
+    type=RESOURCE, resolver=_run_resource, enumerable=False,
+    desc='The raw, unparsed run file for a run not (yet) in the '
+        'package-shipped index.'))
+
+for _kind in ('trec_eval', 'extended'):
+    trec_browser.register_generator(Generator(
+        '{track}/{subtrack}/summary.' + _kind + '.{run_id}.raw',
+        params={'track': _SEGMENT, 'subtrack': _SEGMENT, 'run_id': _RUN_ID},
+        type=RESOURCE, resolver=lambda track, subtrack, run_id, _kind=_kind:
+            _summary_resource(track, subtrack, _kind, run_id),
+        enumerable=False,
+        desc=f'The raw, unparsed {_kind} summary file for a run not (yet) '
+            'in the package-shipped index.'))
 
 # Catch-all: anything else under results/ (appendices, proceedings, ...);
 # registered last so every more specific shape above always wins first --

@@ -19,6 +19,15 @@ sharing its mis-scoped ``<ul>``); another confirms its merged-into neighbor,
 ``trec28_decisions_runs.html`` is a second, well-formed page from a
 different track/task, used both to confirm no warning/regression on clean
 pages and to exercise a couple of its own run entries.
+
+``trec29_deep_data.html``/``trec34_rag_data.html`` are the corresponding
+``.../data/`` pages (distinct from the ``.../runs/`` pages above) for two
+more tracks, downloaded the same way -- used to exercise ``parse_data_page``
+(not ``parse_run_listing``) against real markup: ``trec29/deep``'s page
+cross-references two ``ir_datasets`` ids (see ``export.py``'s own module
+docstring), while ``trec34/rag``'s lists none at all, the far more common
+case (most tracks have no cross-reference) that ``dataset.py``'s own
+``Benchmark`` nodes must degrade out of gracefully rather than erroring on.
 """
 import pathlib
 import unittest
@@ -30,6 +39,8 @@ _RESOURCES = pathlib.Path(__file__).parent / 'resources'
 
 _TREC19_ENTITY_PAGE_URL = 'https://pages.nist.gov/trec-browser/trec19/entity/runs/'
 _TREC28_DECISIONS_PAGE_URL = 'https://pages.nist.gov/trec-browser/trec28/decisions/runs/'
+_TREC29_DEEP_DATA_PAGE_URL = 'https://pages.nist.gov/trec-browser/trec29/deep/data/'
+_TREC34_RAG_DATA_PAGE_URL = 'https://pages.nist.gov/trec-browser/trec34/rag/data/'
 
 
 def _parse(resource_name, page_url):
@@ -38,6 +49,12 @@ def _parse(resource_name, page_url):
         warnings.simplefilter('always')
         records = {r['run_id']: r for r in tbe.parse_run_listing(content, page_url)}
     return records, caught
+
+
+def _parse_data_page(resource_name, page_url):
+    content = (_RESOURCES / resource_name).read_bytes()
+    return list(tbe.parse_data_page(content, page_url))
+
 
 
 class TestParseRunListingAgainstRealDownloadedPages(unittest.TestCase):
@@ -103,6 +120,36 @@ class TestParseRunListingAgainstRealDownloadedPages(unittest.TestCase):
         self.assertEqual('7c29ba0024c1011bcf3eefe60ad2410f', run['md5'])
         self.assertEqual('trec28', run['results_track'])
         self.assertEqual('decision', run['results_subtrack'])
+
+
+class TestParseDataPageAgainstRealDownloadedPages(unittest.TestCase):
+    def test_trec29_deep_data_page_lists_both_ir_datasets_cross_references(self):
+        records = _parse_data_page('trec29_deep_data.html', _TREC29_DEEP_DATA_PAGE_URL)
+        dataset_ids = {r['dataset_id'] for r in records}
+        self.assertEqual(
+            {'msmarco-passage-v2/trec-dl-2020', 'msmarco-document-v2/trec-dl-2020'},
+            dataset_ids)
+        for record in records:
+            self.assertEqual('trec29', record['results_track'])
+            self.assertEqual('deep', record['results_subtrack'])
+
+    def test_trec29_deep_data_page_feeds_a_benchmark_with_both_corpus_ids(self):
+        # The same records, through `build_dataset_index` -- the actual
+        # path `dataset.py`'s `Benchmark` generator reads `ir_datasets_ids`
+        # from (see its own `_BENCHMARK_IDS`).
+        records = _parse_data_page('trec29_deep_data.html', _TREC29_DEEP_DATA_PAGE_URL)
+        index = tbe.build_dataset_index(records)
+        self.assertEqual(
+            ['msmarco-passage-v2/trec-dl-2020', 'msmarco-document-v2/trec-dl-2020'],
+            index[('trec29', 'deep')])
+
+    def test_trec34_rag_data_page_has_no_ir_datasets_cross_reference(self):
+        # The far more common case: a track/subtrack whose `.../data/` page
+        # doesn't cross-reference any `ir_datasets` id at all -- extracted
+        # "when possible", not an error (see export.py's own docstring).
+        records = _parse_data_page('trec34_rag_data.html', _TREC34_RAG_DATA_PAGE_URL)
+        self.assertEqual([], records)
+        self.assertNotIn(('trec34', 'rag'), tbe.build_dataset_index(records))
 
 
 if __name__ == '__main__':
