@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trec-browser-provider"
+version = "0.1.0"
+description = "An ir_datasets v2 provider for run files and trec_eval summaries linked from the TREC Browser (https://pages.nist.gov/trec-browser/)."
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.8"
+classifiers = [
+  "Programming Language :: Python",
+  "Operating System :: OS Independent",
+  "Topic :: Text Processing",
+  "Topic :: Text Processing :: Indexing",
+  "License :: OSI Approved :: MIT License",
+]
+# ir_datasets itself is NOT listed here: its `v2` package (what this
+# provider plugs into) is not yet on a released PyPI version -- install it
+# from git instead, see README.md.
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["trec_browser_provider*"]
+
+[tool.setuptools.package-data]
+trec_browser_provider = ["etc/*.gz", "docs/*.md"]
+
+# Discovered by ir_datasets.v2's own entry-point mechanism
+# (ir_datasets.v2.graph.discover) -- the entry-point *name* must equal the
+# provider's own prefix, see provider.py's own docstring.
+[project.entry-points."ir_datasets.providers"]
+"trec-browser" = "trec_browser_provider.provider:trec_browser"
