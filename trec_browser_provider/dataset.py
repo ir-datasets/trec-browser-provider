@@ -83,7 +83,8 @@ from ir_datasets.v2.base import Edge, Generator, Node, Param
 from ir_datasets.v2.formats import TrecScoredDocs
 from ir_datasets.v2.graph import default_graph
 from ir_datasets.v2.nodes import (
-    Benchmark, DERIVED_FROM, RESOURCE, Resource, SUITE_MEMBER, TABLE,
+    BENCHMARK, Benchmark, DERIVED_FROM, FILE, Resource, SUITE_MEMBER, TABLE,
+    TABLE_TYPES,
     source_resources)
 from ir_datasets.v2.sources import Source
 
@@ -105,10 +106,10 @@ CITATION = 'doi:10.1145/3626772.3657873'
 #: snapshot this module currently installs against, the "evaluation" concept
 #: has been dropped there entirely, with nothing to replace it. Declaring our
 #: own node type here (``parent=TABLE``, as the module-level docstring on
-#: ``registry.ManifestProvider.node_type`` explicitly invites a third-party
+#: ``registry.ManifestProvider.declare_graph_class`` explicitly invites a third-party
 #: provider to do) keeps this provider working without waiting on upstream to
 #: restore (or permanently settle on dropping) that concept.
-EVALUATION_TABLE = trec_browser.node_type(
+EVALUATION_TABLE = trec_browser.declare_graph_class(
     'EvaluationTable', parent=TABLE,
     desc='A Table representing a trec_eval summary for one run: one row per '
          '(measure, query_id) pair, plus an "all" row aggregating across '
@@ -356,7 +357,7 @@ def _run(track, subtrack, run_id, record=None):
         desc += f" {record['description']}"
     table_kwargs = {'metadata': extra_meta} if extra_meta else {}
     return TrecScoredDocs(
-        name, source=resource.gunzip(), desc=desc, citation=CITATION,
+        name, source=resource.gunzip(), summary=desc, citation=CITATION,
         **table_kwargs)
 
 
@@ -382,14 +383,14 @@ def _summary(track, subtrack, kind, run_id, record=None):
     if record and record.get('description'):
         desc += f" {record['description']}"
     table_kwargs = {'metadata': extra_meta} if extra_meta else {}
-    return TrecEval(name, source=resource, desc=desc, citation=CITATION,
+    return TrecEval(name, source=resource, summary=desc, citation=CITATION,
                      **table_kwargs)
 
 
 def _generic(path):
     return _gated_resource(
         path,
-        desc='A TREC Browser-linked file under trec.nist.gov/results/, with '
+        summary='A TREC Browser-linked file under trec.nist.gov/results/, with '
             'no more specific shape this module recognizes (an appendix, a '
             'proceedings PDF, ...); use the live browser '
             '(https://pages.nist.gov/trec-browser/) to see what this is.')
@@ -551,7 +552,7 @@ def _benchmark(track, subtrack):
     desc = (f'Every run/summary submitted to {track}/{subtrack}, as linked '
             'from the TREC Browser, bundled into one evaluable benchmark.')
     return _MemberBenchmark(
-        name, docs=_benchmark_corpus_docs(track, subtrack), desc=desc,
+        name, docs=_benchmark_corpus_docs(track, subtrack), summary=desc,
         citation=CITATION, metadata={'ir_datasets_ids': ids} if ids else {},
         members=_BENCHMARK_MEMBERS.get((track, subtrack), ()))
 
@@ -644,10 +645,10 @@ if _RUN_PATHS:
     # below for names it actually knows about.
     trec_browser.register_generator(Generator(
         '{run_path}', params={'run_path': Param(values=tuple(sorted(_RUN_PATHS)))},
-        type=TrecScoredDocs.type, resolver=_resolve_known_run, enumerable=True,
+        type=TABLE_TYPES['scoreddocs'], resolver=_resolve_known_run, enumerable=True,
         row_metadata=_known_run_row,
         edges=[(DERIVED_FROM, '{run_path}.raw')],
-        desc='A run submitted to TREC, as linked from the TREC Browser, '
+        summary='A run submitted to TREC, as linked from the TREC Browser, '
             'resolved against the package-shipped index (real MD5, '
             'participant, deep link) -- see '
             'ir_datasets/v2/export.py.'))
@@ -660,7 +661,7 @@ if _RUN_PATHS:
             enumerable=True,
             row_metadata=lambda summary_path, _kind=_kind: _known_summary_row(_kind, summary_path),
             edges=[(DERIVED_FROM, '{summary_path}.raw')],
-            desc=f'The {_kind} trec_eval summary for a run known to the '
+            summary=f'The {_kind} trec_eval summary for a run known to the '
                 'package-shipped index.'))
     # One Benchmark per `(track, subtrack)` known to the index -- every run/
     # summary registered above shares one of these names (see the module
@@ -690,19 +691,19 @@ if _RUN_PATHS:
     trec_browser.register_generator(Generator(
         '{run_path}.raw',
         params={'run_path': Param(values=tuple(sorted(_RUN_PATHS)))},
-        type=RESOURCE, resolver=_resolve_known_run_raw, enumerable=True,
+        type=FILE, resolver=_resolve_known_run_raw, enumerable=True,
         row_metadata=_known_run_raw_row,
-        desc='The raw, unparsed run file a known run\'s TrecScoredDocs '
+        summary='The raw, unparsed run file a known run\'s TrecScoredDocs '
             'table is parsed from.'))
     for _kind in ('trec_eval', 'extended'):
         trec_browser.register_generator(Generator(
             '{summary_path}.raw',
             params={'summary_path': Param(values=tuple(sorted(_SUMMARY_PATHS[_kind])))},
-            type=RESOURCE,
+            type=FILE,
             resolver=lambda summary_path, _kind=_kind: _resolve_known_summary_raw(_kind, summary_path),
             enumerable=True,
             row_metadata=lambda summary_path, _kind=_kind: _known_summary_raw_row(_kind, summary_path),
-            desc=f'The raw, unparsed {_kind} summary file a known '
+            summary=f'The raw, unparsed {_kind} summary file a known '
                 'summary\'s TrecEval table is parsed from.'))
 
 # Dynamic fallback: the same three shapes, pattern-matched instead of listed
@@ -713,9 +714,9 @@ if _RUN_PATHS:
 trec_browser.register_generator(Generator(
     '{track}/{subtrack}/input.{run_id}.gz',
     params={'track': _SEGMENT, 'subtrack': _SEGMENT, 'run_id': _RUN_ID},
-    type=TrecScoredDocs.type, resolver=_run, enumerable=False,
+    type=TABLE_TYPES['scoreddocs'], resolver=_run, enumerable=False,
     edges=[(DERIVED_FROM, '{track}/{subtrack}/input.{run_id}.gz.raw')],
-    desc='A run submitted to TREC, as linked from the TREC Browser, not (yet) '
+    summary='A run submitted to TREC, as linked from the TREC Browser, not (yet) '
         'in the package-shipped index -- resolves directly to a parsed '
         'scoreddocs table, without the extra metadata an indexed run gets.'))
 
@@ -728,7 +729,7 @@ for _kind in ('trec_eval', 'extended'):
         enumerable=False,
         edges=[(DERIVED_FROM,
                '{track}/{subtrack}/summary.' + _kind + '.{run_id}.raw')],
-        desc=f'The {_kind} trec_eval summary for a run, as linked from the '
+        summary=f'The {_kind} trec_eval summary for a run, as linked from the '
             'TREC Browser.'))
 
 # Same shape as the index-backed Benchmark above, pattern-matched instead of
@@ -744,8 +745,8 @@ for _kind in ('trec_eval', 'extended'):
 # can never shadow an actual resource.
 trec_browser.register_generator(Generator(
     '{track}/{subtrack}', params={'track': _SEGMENT, 'subtrack': _SEGMENT},
-    type=Benchmark.type, resolver=_benchmark, enumerable=False,
-    desc='Every run/summary submitted to one TREC track/subtrack not (yet) '
+    type=BENCHMARK, resolver=_benchmark, enumerable=False,
+    summary='Every run/summary submitted to one TREC track/subtrack not (yet) '
         'in the package-shipped index, bundled into one evaluable '
         'Benchmark, without the extra metadata an indexed track/subtrack '
         'gets.'))
@@ -758,18 +759,18 @@ trec_browser.register_generator(Generator(
 trec_browser.register_generator(Generator(
     '{track}/{subtrack}/input.{run_id}.gz.raw',
     params={'track': _SEGMENT, 'subtrack': _SEGMENT, 'run_id': _RUN_ID},
-    type=RESOURCE, resolver=_run_resource, enumerable=False,
-    desc='The raw, unparsed run file for a run not (yet) in the '
+    type=FILE, resolver=_run_resource, enumerable=False,
+    summary='The raw, unparsed run file for a run not (yet) in the '
         'package-shipped index.'))
 
 for _kind in ('trec_eval', 'extended'):
     trec_browser.register_generator(Generator(
         '{track}/{subtrack}/summary.' + _kind + '.{run_id}.raw',
         params={'track': _SEGMENT, 'subtrack': _SEGMENT, 'run_id': _RUN_ID},
-        type=RESOURCE, resolver=lambda track, subtrack, run_id, _kind=_kind:
+        type=FILE, resolver=lambda track, subtrack, run_id, _kind=_kind:
             _summary_resource(track, subtrack, _kind, run_id),
         enumerable=False,
-        desc=f'The raw, unparsed {_kind} summary file for a run not (yet) '
+        summary=f'The raw, unparsed {_kind} summary file for a run not (yet) '
             'in the package-shipped index.'))
 
 # Catch-all: anything else under results/ (appendices, proceedings, ...);
@@ -778,6 +779,6 @@ for _kind in ('trec_eval', 'extended'):
 # iteration.
 trec_browser.register_generator(Generator(
     '{path}', params={'path': Param(pattern=r'.+')},
-    type=RESOURCE, resolver=_generic, enumerable=False,
-    desc='Any other file linked from the TREC Browser, under '
+    type=FILE, resolver=_generic, enumerable=False,
+    summary='Any other file linked from the TREC Browser, under '
         'trec.nist.gov/results/.'))

@@ -214,7 +214,7 @@ class TestV2TrecBrowser(unittest.TestCase):
         # `structural_edges()` (including its `SUITE_MEMBER` edges) reaches
         # `discover_edges()`/`build-graph-db`.
         self.assertFalse([g for g in tbm.trec_browser.generators
-                          if g.node_type == v2.Benchmark.type and g.enumerable])
+                          if g.graph_class == v2.BENCHMARK and g.enumerable])
         self.assertIn('trec-browser:trec28/decision', tbm.trec_browser.nodes)
 
     def test_known_benchmark_structural_edges_include_its_runs_and_summaries(self):
@@ -239,7 +239,7 @@ class TestV2TrecBrowser(unittest.TestCase):
                 if src == 'trec-browser:trec28/decision/input.ICTNETv1BM25.gz'}
         self.assertIn(
             ('trec-browser:trec28/decision/input.ICTNETv1BM25.gz',
-             'irds:derived_from',
+             'irds:derivedFrom',
              'trec-browser:trec28/decision/input.ICTNETv1BM25.gz.raw'),
             edges)
 
