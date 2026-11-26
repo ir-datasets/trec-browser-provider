@@ -1,5 +1,8 @@
 # An ir_datasets Provider for the Trec Browser
 
+[![Test](https://github.com/ir-datasets/trec-browser-provider/actions/workflows/test.yml/badge.svg)](https://github.com/ir-datasets/trec-browser-provider/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/ir-datasets/trec-browser-provider/branch/main/graph/badge.svg)](https://codecov.io/gh/ir-datasets/trec-browser-provider)
+
 This allows to use runs and or evaluations from the [TREC Browser](https://pages.nist.gov/trec-browser/) in ir_datasets.
 
 ## Install
@@ -47,6 +50,9 @@ pip install -r requirements-test.txt
 pip install -e .
 pytest
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for linting, coverage, and how to
+regenerate the static index.
 
 ## Graph database image
 
