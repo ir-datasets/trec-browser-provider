@@ -28,7 +28,7 @@ First standalone release, extracted from the `ir-datasets` monorepo.
   download.
 - Graph-db Docker image (`docker/graph-db.Dockerfile`), served with gunicorn,
   published manually via GitHub Actions.
-- Devcontainer; CI running ruff lint and a pytest matrix (3.9-3.13) with a
+- Devcontainer; CI running ruff lint and a pytest matrix (3.10-3.13) with a
   coverage report uploaded to Codecov (badged in the README).
 
 ### Fixed

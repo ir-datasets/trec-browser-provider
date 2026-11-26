@@ -28,11 +28,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        python-version: ['3.10', '3.11', '3.12', '3.13']
 
-    # setup-python has no 3.9 build for the (new) ubuntu-26.04 runner image;
-    # pin the older image until the 3.9 leg is dropped.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
 
     - name: Checkout

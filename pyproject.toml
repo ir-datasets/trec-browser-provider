@@ -8,11 +8,10 @@ version = "0.1.0"
 description = "An ir_datasets v2 provider for run files and trec_eval summaries linked from the TREC Browser (https://pages.nist.gov/trec-browser/)."
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -43,7 +42,7 @@ trec_browser_provider = ["etc/*.gz", "docs/*.md"]
 
 [tool.ruff]
 # Locks in the codebase's existing style; not a restyling effort.
-target-version = "py39"
+target-version = "py310"
 line-length = 110
 
 [tool.ruff.lint]

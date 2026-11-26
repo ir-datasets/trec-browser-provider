@@ -64,6 +64,6 @@ metadata until the index is refreshed.
 
 ## Pull requests
 
-CI must pass: `lint` (ruff) and `pytest` across Python 3.9-3.13. Keep changes
+CI must pass: `lint` (ruff) and `pytest` across Python 3.10-3.13. Keep changes
 surgical, and mirror the codebase's convention of explaining *why* in
 docstrings/comments when a decision is not obvious.
