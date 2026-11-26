@@ -51,6 +51,12 @@ jobs:
         pip install -r requirements-test.txt
         pip install -e .
 
+    - name: Install Java (PyTerrier, a test dependency, runs Terrier on a JVM)
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
+
     - name: Unit tests
       run: |
         pytest test/ --cov=trec_browser_provider --cov-report=term-missing --cov-report=xml

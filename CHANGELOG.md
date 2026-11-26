@@ -3,6 +3,20 @@
 Notable changes to this project. The package is not yet published to PyPI
 (see `README.md`), so versions refer to the git history / Docker image tags.
 
+## Unreleased
+
+### Added
+
+- Integration tests reproducing the run-file page's "Use It" snippets:
+  `test/test_ir_measures_integration.py` loads a run file via
+  `ir_measures.read_trec_run(...)` and evaluates it with
+  `calc_aggregate` against qrels; `test/test_pyterrier_integration.py`
+  loads the same file with `pt.io.read_results(...)`.
+- `ir_measures` and `python-terrier` as test dependencies
+  (`requirements-test.txt`).
+- Java 17 in the dev container and CI (PyTerrier runs Terrier on a JVM
+  via pyjnius).
+
 ## [0.1.0] - 2026-10-29
 
 First standalone release, extracted from the `ir-datasets` monorepo.
