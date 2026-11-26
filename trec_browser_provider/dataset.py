@@ -584,11 +584,10 @@ def _resolve_known_summary(kind, summary_path):
 def _known_summary_row(kind, summary_path):
     track, subtrack, run_id = _SUMMARY_PATHS[kind][summary_path]
     record = _STATIC_INDEX[(track, subtrack, run_id)]
-    row = {}
-    for key in ('participant', 'track', 'year', 'deep_link', 'ir_datasets_ids'):
-        if record.get(key):
-            row[key] = record[key]
-    return row
+    # The same key set the resolved summary node itself carries (see
+    # `_scraped_metadata`) -- the freeze row mirrors the node, rather than
+    # hand-picking a subset and silently losing e.g. `submission_type`.
+    return _scraped_metadata(record)
 
 
 #: ``{run_path}``/``{summary_path}`` + literal ``.raw`` -- the name a run's

@@ -139,6 +139,19 @@ class TestV2TrecBrowser(unittest.TestCase):
             row['validation']['hashes'])
         self.assertEqual('ICTNET', row['participant'])
 
+    def test_known_summaries_get_the_same_row_metadata_their_node_gets(self):
+        # Regression test: the summary freeze row used to hand-pick a subset
+        # of the scraped fields (losing `submission`/`submission_type`), even
+        # though the resolved summary node itself carries the full set (see
+        # `_scraped_metadata`, which `_known_summary_row` now reuses).
+        generator = next(g for g in tbm.trec_browser.generators
+                         if g.graph_class == tbm.EVALUATION_TABLE)
+        row = generator.row_metadata('trec28/decision/summary.trec_eval.ICTNETv1BM25')
+        self.assertEqual('ICTNET', row['participant'])
+        self.assertEqual('auto', row['submission_type'])
+        self.assertEqual('8/27/2019', row['submission'])
+        self.assertIn('deep_link', row)
+
     def test_missing_index_file_degrades_to_no_known_runs(self):
         self.assertEqual({}, tbm._load_static_index('/no/such/file.json.gz'))
 
