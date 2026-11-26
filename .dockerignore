@@ -1,0 +1,15 @@
+# Build context for docker/graph-db.Dockerfile (built from the repo root
+# with `docker build -f docker/graph-db.Dockerfile .`): the image only needs
+# the installable package -- tests/fixtures, VCS/CI metadata, and dev scratch
+# dirs stay out of the published image.
+.git
+.github
+.devcontainer
+test
+.pytest_cache
+.approval_tests_temp
+__pycache__
+*.py[cod]
+*.egg-info
+.venv
+venv

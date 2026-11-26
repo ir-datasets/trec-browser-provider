@@ -8,9 +8,15 @@ version = "0.1.0"
 description = "An ir_datasets v2 provider for run files and trec_eval summaries linked from the TREC Browser (https://pages.nist.gov/trec-browser/)."
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 classifiers = [
   "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Operating System :: OS Independent",
   "Topic :: Text Processing",
   "Topic :: Text Processing :: Indexing",
@@ -34,3 +40,16 @@ trec_browser_provider = ["etc/*.gz", "docs/*.md"]
 # provider's own prefix, see provider.py's own docstring.
 [project.entry-points."ir_datasets.providers"]
 "trec-browser" = "trec_browser_provider.provider:trec_browser"
+
+[tool.ruff]
+# Locks in the codebase's existing style; not a restyling effort.
+target-version = "py39"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# Embedded copies of real, unmodified NIST HTML fixture markup -- the long
+# lines mirror the live site and must not be re-wrapped.
+"test/test_trec_browser_export.py" = ["E501"]

@@ -5,6 +5,25 @@ on:
   pull_request: {}
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Lint
+      # Pinned so a new ruff release cannot fail CI until its findings are
+      # addressed -- bump the pin deliberately.
+      run: |
+        pip install ruff==0.17.6
+        ruff check .
+
   pytest:
     strategy:
       fail-fast: false
@@ -34,4 +53,13 @@ jobs:
 
     - name: Unit tests
       run: |
-        pytest test/
+        pytest test/ --cov=trec_browser_provider --cov-report=term-missing --cov-report=xml
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        # One report per matrix job; Codecov merges them. Optional but
+        # recommended for rate limits: add a CODECOV_TOKEN repository
+        # secret (repo-scoped upload token from codecov.io).
+        files: coverage.xml
+        token: ${{ secrets.CODECOV_TOKEN }}
