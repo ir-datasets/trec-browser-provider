@@ -30,7 +30,9 @@ jobs:
       matrix:
         python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
 
-    runs-on: ubuntu-latest
+    # setup-python has no 3.9 build for the (new) ubuntu-26.04 runner image;
+    # pin the older image until the 3.9 leg is dropped.
+    runs-on: ubuntu-24.04
     steps:
 
     - name: Checkout
@@ -58,8 +60,12 @@ jobs:
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
-        # One report per matrix job; Codecov merges them. Optional but
-        # recommended for rate limits: add a CODECOV_TOKEN repository
-        # secret (repo-scoped upload token from codecov.io).
+        # Required: Codecov rejects tokenless uploads ("Token required - not
+        # valid tokenless upload"). Add a repo-scoped upload token
+        # (codecov.io -> trec-browser-provider -> Settings) as the
+        # CODECOV_TOKEN repository secret.
         files: coverage.xml
         token: ${{ secrets.CODECOV_TOKEN }}
+        # Uploads fail silently otherwise (step exits 0, badge stays
+        # "unknown") -- make a rejected/failed upload loud instead.
+        fail_ci_if_error: true

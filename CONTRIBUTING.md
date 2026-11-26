@@ -24,8 +24,9 @@ pytest --cov=trec_browser_provider --cov-report=term-missing
 
 CI runs the same suite with `--cov-report=xml` and uploads the result to
 [Codecov](https://codecov.io/gh/ir-datasets/trec-browser-provider) (the badge
-in the README); optionally add a repo-scoped `CODECOV_TOKEN` repository
-secret to avoid tokenless-upload rate limits.
+in the README). The upload **requires** a repo-scoped `CODECOV_TOKEN`
+repository secret -- Codecov rejects tokenless uploads; get the token from
+codecov.io (trec-browser-provider -> Settings).
 
 The suite never touches the network: scraper tests run against committed
 snapshots of real (sometimes malformed) NIST pages in `test/resources/`, and
